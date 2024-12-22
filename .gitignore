@@ -1,7 +1,5 @@
 #Project folders to be ignored
-Data/raw/*
-Data/processed/*
-Data/orignals/*
+Data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

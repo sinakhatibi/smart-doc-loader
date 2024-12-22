@@ -1,5 +1,8 @@
 import os
 import shutil
+import copy
+
+from data_utils import *
 
 class FileManager:
     def __init__(self):
@@ -7,6 +10,8 @@ class FileManager:
         self.raw_dir = "./Data/raw"
         self.originals_dir = "./Data/originals"
         self.subdir_dict = {}
+        self.raw_files_dict = {}
+        self.original_files_dict = {}
 
     # Reset the processed directory
     def reset_processed_directory(self):
@@ -54,33 +59,39 @@ class FileManager:
 
     # List the files in the raw directory to be processed in a dictionary based on their extensions
     def list_raw_files(self):
-        raw_files = {}
-        for subdir, dirs, files in os.walk(self.raw_dir):
+        return self.append_raw_files(self.raw_dir)
+    
+    # Append the files in a folder to the list raw files
+    def append_raw_files(self, raw_dir, raw_files_dict=None):
+        if raw_files_dict is None:
+            raw_files_dict = self.raw_files_dict
+        for subdir, dirs, files in os.walk(raw_dir):
             for file in files:
                 file_path = os.path.join(subdir, file)
                 extension = file.split(".")[-1]
-                if extension in raw_files:
-                    raw_files[extension].append(file_path)
+                if extension in raw_files_dict:
+                    raw_files_dict[extension].append(file_path)
                 else:
-                    raw_files[extension] = [file_path]
-        return raw_files
+                    raw_files_dict[extension] = [file_path]
+        return raw_files_dict
     
     # Process the files in the raw directory
     def process_raw_dir(self):
-        raw_files = self.list_raw_files()
+        raw_files_dict = self.list_raw_files()
+        # Append hard copy of raw_files_dict to original_files_dict
+        self.original_files_dict = copy.deepcopy(raw_files_dict)
+
         processed_files = []
         
         # Search in raw_files for the extensions of compressed files
         compressed_extensions = ["zip"]
         for extension in compressed_extensions:
-            if extension in raw_files:
-                compressed_files = raw_files.pop(extension)
-                for compressed_file in compressed_files:
-                    # Implement decompression logic
-                    processed_file = self.process_raw_files(files, extension)
-                    processed_files.append(processed_file)
+            if extension in raw_files_dict:
+                compressed_files = raw_files_dict.pop(extension)
+                processed_file = self.process_raw_files(compressed_files, extension)
+                processed_files.append(processed_file)
 
-        for extension, files in raw_files.items():
+        for extension, files in raw_files_dict.items():
             processed_file = self.process_raw_files(files, extension)
             processed_files.append(processed_file)
         return processed_files
@@ -104,8 +115,38 @@ class FileManager:
 
     # Placeholder methods for processing different file types
     def process_zip_files(self, files):
-        # Implement processing logic for zip files
-        pass
+        # loop over the file in files     
+        for file in files:
+            new_raw_files_dict = {}
+            #get the path of the file and file name
+            file_path = os.path.dirname(file)
+            file_name_extension = os.path.basename(file)
+            file_name = os.path.splitext(file_name_extension)[0]
+            # create a folder with the name of the file with extension
+            new_dir = os.path.join(file_path, file_name)
+            os.makedirs(new_dir, exist_ok=True)
+
+            try:
+                # extract the file
+                shutil.unpack_archive(file, new_dir)
+                self.append_raw_files(new_dir, raw_files_dict=new_raw_files_dict)
+                if "zip" in new_raw_files_dict:
+                    files.extend(new_raw_files_dict["zip"])
+                    new_raw_files_dict.pop("zip")
+                append_dictionaries(self.raw_files_dict, new_raw_files_dict)
+            except:
+                print(f"Error extracting file: {file}")
+                continue
+
+            #if the zip file is available in the original_files_dict
+            # move the file to the processed directory
+            # else delete the zip file
+            if file in self.original_files_dict["zip"]:
+                shutil.move(file, self.subdir_dict["zip"])
+            else:
+                os.remove(file)
+
+
 
     def process_pdf_files(self, files):
         # Implement processing logic for pdf files
@@ -148,7 +189,7 @@ if __name__ == "__main__":
     file_manager = FileManager()
     
     # file_manager.reset_all_directories()
-
+    file_manager.reset_originals_directory()
     # raw_files = file_manager.list_raw_files()
     # print(raw_files)
 

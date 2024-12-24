@@ -1,8 +1,9 @@
 import os
 import shutil
 import copy
-
+from markitdown import MarkItDown
 from data_utils import *
+from docx import Document
 
 class FileManager:
     def __init__(self):
@@ -147,10 +148,24 @@ class FileManager:
                 os.remove(file)
 
 
-
     def process_pdf_files(self, files):
         # Implement processing logic for pdf files
-        pass
+        # loop over the file in files
+        for file in files:
+            md = MarkItDown()
+            result = md.convert(file)
+            # Save result to a markdown file
+            file_name = os.path.splitext(file)[0] + ".md"
+            with open(file_name, 'w') as f:
+                f.write(result)
+
+            # if the pdf file is available in the original_files_dict
+            # move the file to the processed directory
+            # else delete the pdf file
+            # if file in self.original_files_dict["pdf"]:
+            #     shutil.move(file, self.subdir_dict["pdf"])
+            # else:
+            #     os.remove(file)
 
     def process_csv_files(self, files):
         # Implement processing logic for csv files
@@ -166,8 +181,100 @@ class FileManager:
 
     def process_docx_files(self, files):
         # Implement processing logic for docx files
-        pass
+        for file in files:
+            # Read docx file and separate content
+            doc = Document(file)
+            elements = []
+            para_start_index = 0
+            objects_dict = {}
 
+            # Iterate through document elements
+            for element in doc.element.body:
+                if element.tag.endswith('p'):
+                    for index, para in enumerate(doc.paragraphs[para_start_index:]):
+                        if para._element == element:
+                            para_start_index += index + 1 # Update the start index for the next iteration
+                            para_text = para.text
+                            if para.style is None:
+                                para_style = ""
+                            else:
+                                para_style = para.style.name.lower()
+                            elements.append({"type": para_style, "content": para_text})
+                            
+                            # Check for images in the paragraph
+                            for run in para.runs:
+                            #     image_elements = has_image(run)
+                            #     for img_index, img in enumerate(image_elements):
+                            #         # print(f"Image found in paragraph {index + 1}, run {para.runs.index(run) + 1}, image {img_index + 1}")
+                            #         # Add image to elements
+                            #         elements.append({"type": "image", "content": img})
+                                if hasattr(run, 'element') and run.element.xpath('.//a:blip'):
+                                    for blip in run.element.xpath('.//a:blip'):
+                                        rId = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+                                        image_data = doc.part.related_parts[rId].blob
+                                        elements.append({"type": "image", "content": image_data})
+                            break
+
+                elif element.tag.endswith('tbl'):
+                    # Find the table in doc.tables
+                    for table in doc.tables:
+                        if table._element == element:
+                            table_data = []
+                            for row in table.rows:
+                                row_data = [cell.text for cell in row.cells]
+                                table_data.append(row_data)
+                            elements.append({"type": "table", "content": table_data})
+                            break
+                elif element.tag.endswith('sectPr'):
+                    # Handle section properties if needed
+                    pass
+
+            #save the content of elements to a markdown file
+            # Determine the relative path of the file within the raw directory
+            relative_path = os.path.relpath(file, self.raw_dir)
+            
+            # Construct the new file path in the processed directory
+            new_file_path = os.path.join(self.processed_dir, os.path.splitext(relative_path)[0] + ".md")
+            
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+            image_index = 1
+            # Save the result to the new file path
+            with open(new_file_path, 'w') as f:
+                for element in elements:
+                    element_type = element["type"].lower()
+                    if ("list" in element_type)  or ("bullet" in element_type):
+                        bullet = '-' if 'bullet' in element_type else '1.'
+                        f.write(f"{bullet} {element['content']}\n")
+                    elif element_type== "title":
+                        f.write("# " + element["content"] + "\n")
+                    elif element_type.startswith("heading"):
+                        heading_level = element_type.replace("heading", "")
+                        f.write("#" * int(heading_level) + " " + element["content"] + "\n")
+                    elif element_type == "table":
+                        table_content = element["content"]
+                        # Write table header
+                        header = table_content[0]
+                        f.write("| " + " | ".join(header) + " |\n")
+                        f.write("|" + " --- |" * len(header) + "\n")
+                        # Write table rows
+                        for row in table_content[1:]:
+                            f.write("| " + " | ".join(row) + " |\n")
+                    elif element_type == "image":
+                        #check if the images folder exists and create it if it does not
+                        images_folder = os.path.join(os.path.dirname(new_file_path), "images")
+                        os.makedirs(images_folder, exist_ok=True)
+                        #save the image to the images folder
+                        image_path = os.path.join(images_folder, f"image_{image_index}.png")
+                        with open(image_path, 'wb') as img_file:
+                            img_file.write(element["content"])
+                        f.write(f"![image](images/image_{image_index}.png)\n")
+                        image_index += 1
+
+                    else:
+                        f.write(element["content"] + "\n")
+    
+                    
     def process_png_files(self, files):
         # Implement processing logic for png files
         pass
@@ -183,6 +290,9 @@ class FileManager:
     def process_other_files(self, files):
         # Implement processing logic for other files
         pass
+        
+def has_image(run):
+    return run.element.xpath('.//pic:pic')
 
 # Example usage
 if __name__ == "__main__":

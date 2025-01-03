@@ -4,6 +4,7 @@ import copy
 from markitdown import MarkItDown
 from data_utils import *
 from docx import Document
+import xml.etree.ElementTree as ET
 
 class FileManager:
     def __init__(self):
@@ -86,15 +87,17 @@ class FileManager:
         
         # Search in raw_files for the extensions of compressed files
         compressed_extensions = ["zip"]
-        for extension in compressed_extensions:
+        while compressed_extensions:
+            extension = compressed_extensions.pop(0)
             if extension in raw_files_dict:
                 compressed_files = raw_files_dict.pop(extension)
-                processed_file = self.process_raw_files(compressed_files, extension)
-                processed_files.append(processed_file)
+                processed_files += self.process_raw_files(compressed_files, extension)
 
-        for extension, files in raw_files_dict.items():
-            processed_file = self.process_raw_files(files, extension)
-            processed_files.append(processed_file)
+        # Process remaining files in raw_files_dict
+        while raw_files_dict:
+            extension, files = raw_files_dict.popitem()
+            processed_files += self.process_raw_files(files, extension)
+
         return processed_files
     
     # Process a raw file list based on its extension
@@ -116,8 +119,11 @@ class FileManager:
 
     # Placeholder methods for processing different file types
     def process_zip_files(self, files):
+
+        processed_zip_files = []
         # loop over the file in files     
-        for file in files:
+        while files:
+            file = files.pop(0)
             new_raw_files_dict = {}
             #get the path of the file and file name
             file_path = os.path.dirname(file)
@@ -144,8 +150,16 @@ class FileManager:
             # else delete the zip file
             if file in self.original_files_dict["zip"]:
                 shutil.move(file, self.subdir_dict["zip"])
+                #remove the file from the original_files_dict
+                self.original_files_dict["zip"].remove(file)
+
             else:
                 os.remove(file)
+            
+            processed_zip_files.append(file)
+        
+        return processed_zip_files
+
 
 
     def process_pdf_files(self, files):
@@ -180,13 +194,51 @@ class FileManager:
         pass
 
     def process_docx_files(self, files):
-        # Implement processing logic for docx files
-        for file in files:
+        namespace = {
+            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+            'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+            'o': 'urn:schemas-microsoft-com:office:office',
+            'v': 'urn:schemas-microsoft-com:vml',
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        }
+
+        processed_docx_files = []
+        while files:
+            file = files.pop(0)
             # Read docx file and separate content
             doc = Document(file)
             elements = []
             para_start_index = 0
             objects_dict = {}
+            obtype_dict = {}
+            embedding_objects_types = []  
+            main_file_path, main_file_name = os.path.split(file)
+           
+
+            '''
+            todo: currently, the images and emeding objects are saved in the processed directory
+            need to save them in the original directory after processing them into markdown
+            # embed_dir = os.path.join(self.subdir_dict["docx"],main_file_name.replace(".","_")+"_embed")
+            '''
+            embed_dir = os.path.join(self.processed_dir,main_file_name.replace(".","_")+"_embed")
+
+            # delete embeding folder if exists
+            if os.path.exists(embed_dir):
+                shutil.rmtree(embed_dir)
+            os.makedirs(embed_dir, exist_ok=True)
+            # save all the embedded objects in the document
+            for rel in doc.part.rels.values():
+                path, file_name = os.path.split(rel.target_ref)
+                path = os.path.split(path)[-1]
+                path = os.path.join(embed_dir, path)
+                
+                os.makedirs(path, exist_ok=True)
+
+                with open(os.path.join(path,file_name), "wb") as f:
+                    f.write(rel.target_part.blob)
+
+                objects_dict[rel._rId] = os.path.join(path,file_name)
+                obtype_dict[rel._rId] = rel._reltype.split("/")[-1] 
 
             # Iterate through document elements
             for element in doc.element.body:
@@ -199,21 +251,43 @@ class FileManager:
                                 para_style = ""
                             else:
                                 para_style = para.style.name.lower()
-                            elements.append({"type": para_style, "content": para_text})
+
+                            # Check if the paragraph contains an image or text
+                            if para_text != "":
+                                # Append the paragraph to the elements list
+                                elements.append({"type": para_style, "content": para_text})
                             
-                            # Check for images in the paragraph
-                            for run in para.runs:
-                            #     image_elements = has_image(run)
-                            #     for img_index, img in enumerate(image_elements):
-                            #         # print(f"Image found in paragraph {index + 1}, run {para.runs.index(run) + 1}, image {img_index + 1}")
-                            #         # Add image to elements
-                            #         elements.append({"type": "image", "content": img})
-                                if hasattr(run, 'element') and run.element.xpath('.//a:blip'):
-                                    for blip in run.element.xpath('.//a:blip'):
-                                        rId = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
-                                        image_data = doc.part.related_parts[rId].blob
-                                        elements.append({"type": "image", "content": image_data})
-                            break
+                            else:
+                                xmlstr = str(element.xml)
+                                root = ET.fromstring(xmlstr)
+                                
+                                 # Retrieve r:embed for images
+                                blip = root.find('.//a:blip', namespaces=namespace)
+                                if blip is not None:
+                                    r_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                                    elements.append({"type": obtype_dict[r_id], "content": objects_dict[r_id]})
+                                    # add obtype_dict[r_id] to embedding_objects_types list if not available
+                                    if obtype_dict[r_id] not in embedding_objects_types:
+                                        embedding_objects_types.append(obtype_dict[r_id])
+                                
+                                # Retrieve r:id for OLEObjects
+                                ole_object = root.find('.//o:OLEObject', namespaces=namespace)
+                                if ole_object is not None:
+                                    r_id = ole_object.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                                    elements.append({"type": obtype_dict[r_id], "content": objects_dict[r_id]})
+                                    # add obtype_dict[r_id] to embedding_objects_types list if not available
+                                    if obtype_dict[r_id] not in embedding_objects_types:
+                                        embedding_objects_types.append(obtype_dict[r_id])
+                                
+                                # Retrieve r:id for v:imagedata
+                                imagedata = root.find('.//v:imagedata', namespaces=namespace)
+                                if imagedata is not None:
+                                    r_id = imagedata.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                                    elements.append({"type": obtype_dict[r_id], "content": objects_dict[r_id]})
+                                    # add obtype_dict[r_id] to embedding_objects_types list if not available
+                                    if obtype_dict[r_id] not in embedding_objects_types:
+                                        embedding_objects_types.append(obtype_dict[r_id])
+
 
                 elif element.tag.endswith('tbl'):
                     # Find the table in doc.tables
@@ -229,50 +303,24 @@ class FileManager:
                     # Handle section properties if needed
                     pass
 
-            #save the content of elements to a markdown file
-            # Determine the relative path of the file within the raw directory
-            relative_path = os.path.relpath(file, self.raw_dir)
-            
+            #save the content of elements to a markdown file        
             # Construct the new file path in the processed directory
-            new_file_path = os.path.join(self.processed_dir, os.path.splitext(relative_path)[0] + ".md")
+            new_file_path = os.path.join(self.processed_dir, os.path.splitext(main_file_name)[0] + ".md")
             
             # Ensure the directory exists
             os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-            image_index = 1
-            # Save the result to the new file path
-            with open(new_file_path, 'w') as f:
-                for element in elements:
-                    element_type = element["type"].lower()
-                    if ("list" in element_type)  or ("bullet" in element_type):
-                        bullet = '-' if 'bullet' in element_type else '1.'
-                        f.write(f"{bullet} {element['content']}\n")
-                    elif element_type== "title":
-                        f.write("# " + element["content"] + "\n")
-                    elif element_type.startswith("heading"):
-                        heading_level = element_type.replace("heading", "")
-                        f.write("#" * int(heading_level) + " " + element["content"] + "\n")
-                    elif element_type == "table":
-                        table_content = element["content"]
-                        # Write table header
-                        header = table_content[0]
-                        f.write("| " + " | ".join(header) + " |\n")
-                        f.write("|" + " --- |" * len(header) + "\n")
-                        # Write table rows
-                        for row in table_content[1:]:
-                            f.write("| " + " | ".join(row) + " |\n")
-                    elif element_type == "image":
-                        #check if the images folder exists and create it if it does not
-                        images_folder = os.path.join(os.path.dirname(new_file_path), "images")
-                        os.makedirs(images_folder, exist_ok=True)
-                        #save the image to the images folder
-                        image_path = os.path.join(images_folder, f"image_{image_index}.png")
-                        with open(image_path, 'wb') as img_file:
-                            img_file.write(element["content"])
-                        f.write(f"![image](images/image_{image_index}.png)\n")
-                        image_index += 1
 
-                    else:
-                        f.write(element["content"] + "\n")
+            try:
+                # Save the elements to the markdown file
+                save_elements_to_file(elements, new_file_path, embedding_objects_types=embedding_objects_types)
+                processed_docx_files.append(file)
+
+            except Exception as e:
+                print(f"Error saving file: {new_file_path}")
+                print(f"Exception: {e}")
+                continue
+        
+        return processed_docx_files
     
                     
     def process_png_files(self, files):
@@ -290,9 +338,36 @@ class FileManager:
     def process_other_files(self, files):
         # Implement processing logic for other files
         pass
-        
-def has_image(run):
-    return run.element.xpath('.//pic:pic')
+
+def save_elements_to_file(elements, new_file_path, embedding_objects_types = ["image"]):
+    with open(new_file_path, 'w') as f:
+        for element in elements:
+            element_type = element["type"].lower()
+            if ("list" in element_type) or ("bullet" in element_type):
+                bullet = '-' if 'bullet' in element_type else '1.'
+                f.write(f"{bullet} {element['content']}\n")
+            elif element_type == "title":
+                f.write("# " + element["content"] + "\n")
+            elif element_type.startswith("heading"):
+                heading_level = element_type.replace("heading", "")
+                f.write("#" * int(heading_level) + " " + element["content"] + "\n")
+            elif element_type == "table":
+                table_content = element["content"]
+                # Write table header
+                header = table_content[0]
+                f.write("| " + " | ".join(header) + " |\n")
+                f.write("|" + " --- |" * len(header) + "\n")
+                # Write table rows
+                for row in table_content[1:]:
+                    f.write("| " + " | ".join(row) + " |\n")
+            elif element_type in embedding_objects_types:
+                # check if the images folder exists and create it if it does not
+                f.write(f"![{element['type']}]({element['content']})\n")
+            else:
+                # Uncomment if you want to have the custom type/style in the markdown file
+                # f.write(f"<!-- Start Custom Type/style: {element["type"]} -->\n")
+                f.write(element["content"] + "\n")
+                # f.write(f"<!-- End Custom Type/style: {element["type"]} -->\n")
 
 # Example usage
 if __name__ == "__main__":

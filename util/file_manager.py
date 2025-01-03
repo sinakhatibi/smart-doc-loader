@@ -150,17 +150,12 @@ class FileManager:
             # else delete the zip file
             if file in self.original_files_dict["zip"]:
                 shutil.move(file, self.subdir_dict["zip"])
-                #remove the file from the original_files_dict
-                self.original_files_dict["zip"].remove(file)
-
             else:
                 os.remove(file)
             
             processed_zip_files.append(file)
         
         return processed_zip_files
-
-
 
     def process_pdf_files(self, files):
         # Implement processing logic for pdf files
@@ -314,6 +309,8 @@ class FileManager:
                 # Save the elements to the markdown file
                 save_elements_to_file(elements, new_file_path, embedding_objects_types=embedding_objects_types)
                 processed_docx_files.append(file)
+                shutil.move(file, self.subdir_dict["docx"])
+
 
             except Exception as e:
                 print(f"Error saving file: {new_file_path}")

@@ -2,15 +2,15 @@ import os
 import shutil
 import copy
 from markitdown import MarkItDown
-from data_utils import *
+from util.data_utils import *
 from docx import Document
 import xml.etree.ElementTree as ET
 
 class FileManager:
-    def __init__(self):
-        self.processed_dir = "./Data/processed"
-        self.raw_dir = "./Data/raw"
-        self.originals_dir = "./Data/originals"
+    def __init__(self, root_dir="./Data"):
+        self.processed_dir = os.path.join(root_dir, "processed")
+        self.raw_dir = os.path.join(root_dir, "raw")
+        self.originals_dir = os.path.join(root_dir, "originals")
         self.subdir_dict = {}
         self.raw_files_dict = {}
         self.original_files_dict = {}

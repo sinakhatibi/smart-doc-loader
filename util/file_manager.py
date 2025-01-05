@@ -2,9 +2,11 @@ import os
 import shutil
 import copy
 from markitdown import MarkItDown
-from util.data_utils import *
+from . import data_utils
 from docx import Document
 import xml.etree.ElementTree as ET
+# import PyPDF2
+from unstructured.partition.pdf import partition_pdf
 
 class FileManager:
     def __init__(self, root_dir="./Data"):
@@ -140,7 +142,7 @@ class FileManager:
                 if "zip" in new_raw_files_dict:
                     files.extend(new_raw_files_dict["zip"])
                     new_raw_files_dict.pop("zip")
-                append_dictionaries(self.raw_files_dict, new_raw_files_dict)
+                data_utils.append_dictionaries(self.raw_files_dict, new_raw_files_dict)
             except:
                 print(f"Error extracting file: {file}")
                 continue
@@ -160,21 +162,44 @@ class FileManager:
     def process_pdf_files(self, files):
         # Implement processing logic for pdf files
         # loop over the file in files
-        for file in files:
-            md = MarkItDown()
-            result = md.convert(file)
-            # Save result to a markdown file
-            file_name = os.path.splitext(file)[0] + ".md"
-            with open(file_name, 'w') as f:
-                f.write(result)
+        processed_pdf_files = []
+        while files:
+            file = files.pop(0)
+            main_file_path, main_file_name = os.path.split(file)
+            output_dir = os.path.join(self.processed_dir, main_file_name.replace(".","_")+"_images")
 
+            rpe = partition_pdf(
+                filename=file,
+                strategy="auto",
+                extract_image_block_types=["Image", "Table"],
+                infer_table_structure=False,
+                # chunking_strategy="title",
+                max_characters=4000,
+                new_after_n_chars=3800,
+                combine_text_under_n_chars=2000,
+                extract_image_block_output_dir = f"{output_dir}",
+                # Add a callback function to update the progress bar
+            #   progress_callback=lambda current_page: pbar.update(1) if current_page else None
+            )
+
+            new_file_path = os.path.join(self.processed_dir, os.path.splitext(main_file_name)[0] + ".md")
+
+             # Open the markdown file for writing
+            with open(new_file_path, 'w', encoding='utf-8') as md_file:
+                for el in rpe:
+                    if el.category == 'Image' or el.category == 'Figure' or el.category == 'Picture':
+                        md_file.write(f"![Image]({el.metadata.image_path})\n")
+                    else:
+                        md_file.write(f"{el.text}\n")
+            processed_pdf_files.append(file)
             # if the pdf file is available in the original_files_dict
             # move the file to the processed directory
             # else delete the pdf file
-            # if file in self.original_files_dict["pdf"]:
-            #     shutil.move(file, self.subdir_dict["pdf"])
-            # else:
-            #     os.remove(file)
+            if file in self.original_files_dict["pdf"]:
+                shutil.move(file, self.subdir_dict["pdf"])
+            else:
+                os.remove(file)
+        return processed_pdf_files
 
     def process_csv_files(self, files):
         # Implement processing logic for csv files

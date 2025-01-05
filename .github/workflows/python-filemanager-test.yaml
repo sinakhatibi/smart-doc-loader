@@ -30,7 +30,7 @@ jobs:
         pip install -q PyPDF2 
         pip install -q "unstructured[all-docs]" pydantic
         if [ ${{ matrix.os }} == 'ubuntu-latest' ]; then
-          apt-get install -y poppler-utils libmagic-dev tesseract-ocr libreoffice
+          sudo apt-get install -y poppler-utils libmagic-dev tesseract-ocr libreoffice
         fi
 
     - name: Run tests

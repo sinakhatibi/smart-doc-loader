@@ -93,7 +93,7 @@ class TestFileManager(unittest.TestCase):
             self.assertTrue(any(f"{file_name}.docx" in file for file in processed_files), msg= f"{file_name}.docx not found in processed_files")
 
         processed_files_list = os.listdir(self.file_manager.processed_dir)
-        self.assertEqual(len(processed_files_list), 4, msg= f"Expected 4 files in processed_dir, found {len(processed_files_list)}")
+        self.assertEqual(len(processed_files_list), len(expected_processed_files_list), msg= f"Expected {len(expected_processed_files_list)} files in processed_dir, found {len(processed_files_list)}")
 
         # compare the processed files with the expected artifacts
         # for file_name in file_names:
@@ -109,7 +109,32 @@ class TestFileManager(unittest.TestCase):
                     with open(os.path.join(self.file_manager.processed_dir, processed_files_list[idx]), 'r') as actual_file:
                         self.assertEqual(expected_file.read(), actual_file.read(), msg= f"Expected content of {expected_processed_files_list[idx]} does not match actual content")
 
+    def test_09_process_raw_dir_process_pdf_files(self):
+        self.file_manager.reset_all_directories()
+        shutil.unpack_archive("tests/test03.zip", self.file_manager.raw_dir)
 
+        # copy ./test03_expected_artifacts.zip to expected_artifacts_dir and unpack it
+        shutil.unpack_archive("tests/test03_expected_artifact.zip", self.expected_artifacts_dir)
+        expected_processed_files_list = os.listdir(self.expected_artifacts_dir)
+        
+        processed_files = self.file_manager.process_raw_dir()
+        self.assertEqual(len(processed_files), 1)
+        self.assertTrue(any("Hello.pdf" in file for file in processed_files))
+
+        file_names = ["Hello"]
+        for file_name in file_names:
+            self.assertTrue(any(f"{file_name}.pdf" in file for file in processed_files), msg= f"{file_name}.pdf not found in processed_files")
+
+        processed_files_list = os.listdir(self.file_manager.processed_dir)
+        self.assertEqual(len(processed_files_list), len(expected_processed_files_list), msg= f"Expected {len(expected_processed_files_list)} files in processed_dir, found {len(processed_files_list)}")
+
+        # compare the processed files with the expected artifacts
+        for idx in range(len(expected_processed_files_list)):
+            self.assertEqual(processed_files_list[idx], expected_processed_files_list[idx], msg= f"Expected {expected_processed_files_list[idx]} does not match actual {processed_files_list[idx]}")
+            if os.path.isfile(os.path.join(self.expected_artifacts_dir, expected_processed_files_list[idx])):
+                with open(os.path.join(self.expected_artifacts_dir, expected_processed_files_list[idx]), 'r') as expected_file:
+                    with open(os.path.join(self.file_manager.processed_dir, processed_files_list[idx]), 'r') as actual_file:
+                        self.assertEqual(expected_file.read(), actual_file.read(), msg= f"Expected content of {expected_processed_files_list[idx]} does not match actual content")
 
 if __name__ == "__main__":
     unittest.main()
